@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+config.json
+history.jsonl
+models/
+.vscode/
+.idea/
