@@ -46,7 +46,12 @@ class HotkeyManager:
             keyboard.block_key("caps lock")
             print("[hotkey] Caps Lock 大小寫切換已停用(聽寫工具使用中)")
 
-        h = keyboard.on_press_key(key, lambda _e: self._toggle_safe(), suppress=False)
+        # 用 hook + name 過濾，確保 right ctrl / left ctrl 不互相干擾
+        def _handler(event):
+            if event.name == key and event.event_type == keyboard.KEY_DOWN:
+                self._toggle_safe()
+
+        h = keyboard.hook(_handler, suppress=False)
         self._hooks.append(h)
 
     def _toggle_safe(self) -> None:
