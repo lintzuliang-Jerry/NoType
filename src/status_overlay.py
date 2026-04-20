@@ -1,7 +1,7 @@
-"""跟隨滑鼠游標的浮動狀態提示視窗。
+"""螢幕中下方固定浮動狀態提示視窗。
 
 使用 PIL 渲染圓角藥丸 + Win32 UpdateLayeredWindow 逐像素透明。
-錄音狀態有正弦脈動動畫。在獨立 Win32 訊息迴圈執行緒執行。
+錄音狀態：平滑脈動紅點。辨識中：三點序列淡入淡出動畫。
 """
 from __future__ import annotations
 
@@ -39,7 +39,6 @@ SWP_NOMOVE       = 0x0002
 SWP_NOACTIVATE   = 0x0010
 SWP_SHOWWINDOW   = 0x0040
 TIMER_PULSE      = 1
-TIMER_FOLLOW     = 2
 
 user32   = ctypes.windll.user32
 gdi32    = ctypes.windll.gdi32
@@ -51,7 +50,6 @@ _WNDPROC = ctypes.WINFUNCTYPE(
 user32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, ctypes.c_size_t, ctypes.c_ssize_t]
 user32.DefWindowProcW.restype  = ctypes.c_ssize_t
 user32.UpdateLayeredWindow.restype = wt.BOOL
-user32.GetCursorPos.argtypes   = [ctypes.POINTER(wt.POINT)]
 
 # ── Win32 結構 ───────────────────────────────────────────────────────────────
 class _BIH(ctypes.Structure):
@@ -72,20 +70,31 @@ class _BF(ctypes.Structure):
     ]
 
 # ── 視覺設計 ──────────────────────────────────────────────────────────────────
-_W, _H  = 160, 42
-_RADIUS = 21          # 完整藥丸
-_BG     = (18, 18, 20, 230)
+_W, _H        = 124, 50
+_RADIUS       = 25
+_BOTTOM_MARGIN = 80      # 距螢幕底部距離（px）
+
+# 背景：極深近黑，微帶藍調，高不透明度
+_BG           = (11, 11, 16, 248)
+_BORDER_A     = 28       # 細邊框 alpha（模擬毛玻璃邊緣）
+_SHINE_A      = 12       # 頂部高光 alpha
 
 _STATES: dict[str, tuple[str, tuple[int,int,int], bool]] = {
-    "recording":    ("錄音中", (255, 69,  58), True),
-    "transcribing": ("辨識中", (255, 159, 10), False),
+    "recording":    ("錄音中", (255, 55,  50), True),
+    "transcribing": ("辨識中", (255, 149,  0), False),
 }
 
-_DOT_MIN  = 5
-_DOT_MAX  = 8
-_DOT_BASE = 7
-_DOT_CX   = 22        # 圓點中心 x（留足最大半徑空間）
-_FONT_SZ  = 14
+_FONT_SZ      = 15
+_DOT_CX       = 26       # 錄音點中心 x
+_DOT_MIN      = 5
+_DOT_MAX      = 8
+_DOT_BASE     = 6
+
+# 辨識中三點
+_DOTS3_CX     = [15, 26, 37]   # 三點中心 x
+_DOT3_R_MIN   = 3
+_DOT3_R_MAX   = 5
+_TEXT_X       = 51       # 文字起始 x
 
 # ── 字型 ─────────────────────────────────────────────────────────────────────
 _font_cache: Optional[ImageFont.FreeTypeFont] = None
@@ -94,7 +103,7 @@ def _get_font() -> ImageFont.FreeTypeFont:
     global _font_cache
     if _font_cache is None:
         for path in [
-            r"C:\Windows\Fonts\msjhbd.ttc",
+            r"C:\Windows\Fonts\msjhbd.ttc",   # 微軟正黑粗體
             r"C:\Windows\Fonts\msjh.ttc",
             r"C:\Windows\Fonts\msyh.ttc",
             r"C:\Windows\Fonts\segoeui.ttf",
@@ -110,52 +119,82 @@ def _get_font() -> ImageFont.FreeTypeFont:
     return _font_cache
 
 # ── PIL 渲染 ─────────────────────────────────────────────────────────────────
-def _render(state: str, pulse: float = 0.0) -> Image.Image:
+def _render(state: str, pulse: float = 0.0, tick: int = 0) -> Image.Image:
     label, dot_rgb, do_pulse = _STATES[state]
     img  = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
+    # 背景藥丸
     draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS, fill=_BG)
 
+    # 細緻白色邊框，模擬毛玻璃質感
+    draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS,
+                            outline=(255, 255, 255, _BORDER_A), width=1)
+
+    # 頂部微高光（2px 漸層模擬）
+    highlight = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(highlight)
+    hd.rounded_rectangle([1, 1, _W - 2, _H // 2], radius=_RADIUS - 1,
+                          fill=(255, 255, 255, _SHINE_A))
+    img = Image.alpha_composite(img, highlight)
+    draw = ImageDraw.Draw(img)
+
     cy = _H // 2
-    r  = int(_DOT_MIN + (_DOT_MAX - _DOT_MIN) * pulse) if do_pulse else _DOT_BASE
-    glow_r = r + 5
-    glow_a = 40 + int(35 * pulse) if do_pulse else 50
-    draw.ellipse(
-        [_DOT_CX - glow_r, cy - glow_r, _DOT_CX + glow_r, cy + glow_r],
-        fill=(*dot_rgb, glow_a),
-    )
-    draw.ellipse(
-        [_DOT_CX - r, cy - r, _DOT_CX + r, cy + r],
-        fill=(*dot_rgb, 255),
-    )
+
+    if do_pulse:
+        # 錄音：單點平滑脈動，帶多層光暈
+        r = _DOT_MIN + (_DOT_MAX - _DOT_MIN) * pulse
+        for layer_r, layer_a in [
+            (r + 11, int(18 * pulse)),
+            (r + 6,  int(45 * pulse)),
+            (r,      255),
+        ]:
+            lr = int(layer_r)
+            cx = _DOT_CX
+            draw.ellipse(
+                [cx - lr, cy - lr, cx + lr, cy + lr],
+                fill=(*dot_rgb, layer_a),
+            )
+        tx = _TEXT_X
+    else:
+        # 辨識中：三點序列淡入淡出（相位差 120°）
+        for i, cx in enumerate(_DOTS3_CX):
+            phase = (tick / 36 * 2 * math.pi) - i * (2 * math.pi / 3)
+            t     = (math.sin(phase) + 1) / 2          # 0.0 ~ 1.0
+            alpha = int(60 + 195 * t)
+            r     = _DOT3_R_MIN + (_DOT3_R_MAX - _DOT3_R_MIN) * t
+            ri    = int(r)
+            draw.ellipse(
+                [cx - ri, cy - ri, cx + ri, cy + ri],
+                fill=(*dot_rgb, alpha),
+            )
+        tx = _TEXT_X
 
     font = _get_font()
-    tx   = _DOT_CX + _DOT_MAX + 10
     bbox = draw.textbbox((0, 0), label, font=font)
-    ty   = (_H - (bbox[3] - bbox[1])) // 2 - 1
-    draw.text((tx, ty), label, font=font, fill=(255, 255, 255, 235))
+    ty   = (_H - (bbox[3] - bbox[1])) // 2 - 3
+    draw.text((tx, ty), label, font=font, fill=(255, 255, 255, 230))
 
     return img
 
 # ── PIL RGBA → pre-multiplied BGRA HBITMAP（numpy 加速）───────────────────────
 def _to_hbitmap(img: Image.Image) -> int:
     w, h = img.size
-    arr  = np.array(img, dtype=np.uint16)   # uint16 防乘法溢位
+    arr  = np.array(img, dtype=np.uint16)
     a    = arr[:, :, 3:4]
     bgra = np.empty((h, w, 4), dtype=np.uint8)
-    bgra[:, :, 0] = (arr[:, :, 2] * a[:, :, 0] // 255).astype(np.uint8)  # B
-    bgra[:, :, 1] = (arr[:, :, 1] * a[:, :, 0] // 255).astype(np.uint8)  # G
-    bgra[:, :, 2] = (arr[:, :, 0] * a[:, :, 0] // 255).astype(np.uint8)  # R
-    bgra[:, :, 3] = arr[:, :, 3].astype(np.uint8)                         # A
+    bgra[:, :, 0] = (arr[:, :, 2] * a[:, :, 0] // 255).astype(np.uint8)
+    bgra[:, :, 1] = (arr[:, :, 1] * a[:, :, 0] // 255).astype(np.uint8)
+    bgra[:, :, 2] = (arr[:, :, 0] * a[:, :, 0] // 255).astype(np.uint8)
+    bgra[:, :, 3] = arr[:, :, 3].astype(np.uint8)
     buf = bgra.tobytes()
 
     bmi = _BI()
-    bmi.bmiHeader.biSize      = ctypes.sizeof(_BIH)
-    bmi.bmiHeader.biWidth     = w
-    bmi.bmiHeader.biHeight    = -h
-    bmi.bmiHeader.biPlanes    = 1
-    bmi.bmiHeader.biBitCount  = 32
+    bmi.bmiHeader.biSize        = ctypes.sizeof(_BIH)
+    bmi.bmiHeader.biWidth       = w
+    bmi.bmiHeader.biHeight      = -h
+    bmi.bmiHeader.biPlanes      = 1
+    bmi.bmiHeader.biBitCount    = 32
     bmi.bmiHeader.biCompression = BI_RGB
 
     pbits = ctypes.c_void_p()
@@ -167,6 +206,14 @@ def _to_hbitmap(img: Image.Image) -> int:
         raise RuntimeError("CreateDIBSection 失敗")
     ctypes.memmove(pbits, buf, len(buf))
     return hbm
+
+# ── 螢幕中下方位置 ────────────────────────────────────────────────────────────
+def _screen_center_bottom() -> tuple[int, int]:
+    sw = user32.GetSystemMetrics(0)
+    sh = user32.GetSystemMetrics(1)
+    x  = (sw - _W) // 2
+    y  = sh - _H - _BOTTOM_MARGIN
+    return x, y
 
 # ── StatusOverlay ─────────────────────────────────────────────────────────────
 class StatusOverlay:
@@ -211,7 +258,7 @@ class StatusOverlay:
 
     def _message_loop(self) -> None:
         hinstance  = kernel32.GetModuleHandleW(None)
-        class_name = "NoTypeOverlayV3"
+        class_name = "NoTypeOverlayV4"
 
         class _WC(ctypes.Structure):
             _fields_ = [
@@ -234,14 +281,11 @@ class StatusOverlay:
                     return 0
                 elif msg == WM_TIMER:
                     if wparam == TIMER_PULSE and self._visible:
-                        self._tick = (self._tick + 1) % 40
+                        self._tick = (self._tick + 1) % 360
                         self._repaint(hwnd)
-                    elif wparam == TIMER_FOLLOW and self._visible:
-                        self._follow(hwnd)
                     return 0
                 elif msg == WM_DESTROY:
                     user32.KillTimer(hwnd, TIMER_PULSE)
-                    user32.KillTimer(hwnd, TIMER_FOLLOW)
                     user32.PostQuitMessage(0)
                     return 0
             except Exception as e:
@@ -256,10 +300,11 @@ class StatusOverlay:
         wc.lpszClassName = class_name
         user32.RegisterClassW(ctypes.byref(wc))
 
+        x, y = _screen_center_bottom()
         hwnd = user32.CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
             class_name, "", WS_POPUP,
-            100, 100, _W, _H,
+            x, y, _W, _H,
             None, None, hinstance, None,
         )
         if not hwnd:
@@ -277,19 +322,8 @@ class StatusOverlay:
 
     # ── 訊息處理 ─────────────────────────────────────────────────────────────
 
-    def _cursor_xy(self) -> tuple[int, int]:
-        pt = wt.POINT()
-        user32.GetCursorPos(ctypes.byref(pt))
-        x, y = pt.x + 18, pt.y + 18
-        sw = user32.GetSystemMetrics(0)
-        sh = user32.GetSystemMetrics(1)
-        if x + _W > sw: x = sw - _W - 8
-        if y + _H > sh: y = sh - _H - 8
-        return x, y
-
     def _ulw(self, hwnd: int, pulse: float, x: Optional[int], y: Optional[int]) -> None:
-        """UpdateLayeredWindow。x/y=None 表示不移動。"""
-        img = _render(self._state, pulse)
+        img = _render(self._state, pulse, self._tick)
         hbm = _to_hbitmap(img)
 
         hdc_s = user32.GetDC(None)
@@ -321,28 +355,18 @@ class StatusOverlay:
 
     def _on_show(self, hwnd: int) -> None:
         self._tick = 0
-        x, y = self._cursor_xy()
-        self._ulw(hwnd, 0.0, x, y)        # 渲染 + 定位
-        user32.ShowWindow(hwnd, SW_SHOW)   # 確保可見
+        x, y = _screen_center_bottom()
+        self._ulw(hwnd, 0.0, x, y)
+        user32.ShowWindow(hwnd, SW_SHOW)
         self._visible = True
-        user32.SetTimer(hwnd, TIMER_PULSE,  50, None)   # 50ms 脈動
-        user32.SetTimer(hwnd, TIMER_FOLLOW, 80, None)   # 80ms 跟游標
+        user32.SetTimer(hwnd, TIMER_PULSE, 40, None)   # 40ms ≈ 25fps
 
     def _on_hide(self, hwnd: int) -> None:
         user32.KillTimer(hwnd, TIMER_PULSE)
-        user32.KillTimer(hwnd, TIMER_FOLLOW)
         user32.ShowWindow(hwnd, SW_HIDE)
         self._visible = False
 
     def _repaint(self, hwnd: int) -> None:
-        pulse = (math.sin(self._tick / 40 * 2 * math.pi) + 1) / 2
-        self._ulw(hwnd, pulse, None, None)   # 只重繪，不移動
-
-    def _follow(self, hwnd: int) -> None:
-        x, y = self._cursor_xy()
-        # SetWindowPos 移動即可，不需重繪
-        user32.SetWindowPos(
-            hwnd, ctypes.c_void_p(-1),   # HWND_TOPMOST
-            x, y, 0, 0,
-            SWP_NOSIZE | SWP_NOACTIVATE,
-        )
+        # 錄音：正弦脈動；辨識中：tick 傳給三點動畫
+        pulse = (math.sin(self._tick / 36 * 2 * math.pi) + 1) / 2
+        self._ulw(hwnd, pulse, None, None)
