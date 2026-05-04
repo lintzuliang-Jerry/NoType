@@ -112,7 +112,7 @@ _SEP_Y1 = 11
 _SEP_Y2 = 33
 
 # 文字
-_TEXT_X  = 50
+_TEXT_X  = 56
 _FONT_SZ = 15
 
 # 底部光條
@@ -122,8 +122,8 @@ _BAR_Y  = 39
 _BAR_H  = 2
 
 _STATES: dict[str, tuple[str, tuple[int,int,int]]] = {
-    "recording":    ("錄音中", _REC_RGB),
-    "transcribing": ("辨識中", _TRX_RGB),
+    "recording":    ("Recording", _REC_RGB),
+    "transcribing": ("Processing", _TRX_RGB),
 }
 
 # ── 字型 ─────────────────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ def _render(state: str, pulse: float = 0.0, tick: int = 0) -> Image.Image:
     draw = ImageDraw.Draw(img)
     font = _get_font()
     bbox = draw.textbbox((0, 0), label, font=font)
-    ty = (_H - (bbox[3] - bbox[1])) // 2 - 2
+    ty = (_H - (bbox[3] - bbox[1])) // 2 - 3
     # 文字陰影
     draw.text((_TEXT_X + 1, ty + 1), label, font=font, fill=(0, 0, 0, 90))
     draw.text((_TEXT_X, ty), label, font=font, fill=(255, 255, 255, 240))
