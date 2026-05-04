@@ -70,9 +70,9 @@ class _BF(ctypes.Structure):
     ]
 
 # ── 視覺設計 ──────────────────────────────────────────────────────────────────
-_W, _H        = 220, 56
-_RADIUS       = 28
-_BOTTOM_MARGIN = 100
+_W, _H        = 164, 44
+_RADIUS       = 22
+_BOTTOM_MARGIN = 90
 
 # 背景色（錄音偏暖、辨識偏冷）
 _BG_REC  = (20, 14, 18, 238)
@@ -82,43 +82,43 @@ _HL_A    = 10       # 頂部高光 alpha
 
 # 錄音：珊瑚紅
 _REC_RGB = (255, 75, 75)
-_GLOW_CX = 30
+_GLOW_CX = 24
 # (extra_radius, alpha_at_full_pulse, alpha_at_zero_pulse)
 _GLOW_LAYERS = [
-    (19, 14,  4),
-    (14, 38, 12),
-    (9,  80, 40),
-    (5, 170, 130),
+    (15, 14,  4),
+    (11, 38, 12),
+    (7,  80, 40),
+    (4, 170, 130),
     (0, 255, 255),   # 實心核心
 ]
-_CORE_R  = 5
+_CORE_R  = 4
 
 # 辨識：天藍
 _TRX_RGB = (80, 175, 255)
 # 音波條
-_WAVE_CXS     = [17, 23, 29, 35, 41]
+_WAVE_CXS     = [14, 20, 26, 32, 38]
 _WAVE_BAR_W   = 3
-_WAVE_MAX_H   = 20
-_WAVE_MIN_H   = 5
+_WAVE_MAX_H   = 16
+_WAVE_MIN_H   = 4
 # 旋轉弧線
-_SPIN_CX      = 196
-_SPIN_R       = 9
+_SPIN_CX      = 146
+_SPIN_R       = 7
 _SPIN_WIDTH   = 2
 _SPIN_ARC     = 100
 
 # 分隔線
-_SEP_X  = 52
-_SEP_Y1 = 14
-_SEP_Y2 = 42
+_SEP_X  = 42
+_SEP_Y1 = 11
+_SEP_Y2 = 33
 
 # 文字
-_TEXT_X  = 62
-_FONT_SZ = 16
+_TEXT_X  = 50
+_FONT_SZ = 15
 
 # 底部光條
-_BAR_X1 = 28
-_BAR_X2 = 192
-_BAR_Y  = 50
+_BAR_X1 = 22
+_BAR_X2 = 142
+_BAR_Y  = 39
 _BAR_H  = 2
 
 _STATES: dict[str, tuple[str, tuple[int,int,int]]] = {
