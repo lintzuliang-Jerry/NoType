@@ -55,8 +55,24 @@ class HotkeyManager:
             print("[hotkey] Caps Lock 大小寫切換已停用(聽寫工具使用中)")
 
         # 預先取得 scan code，匹配時優先用 scan code（比 event.name 穩定）
+        # keyboard.key_to_scan_codes("right ctrl") 會包含左 ctrl 的 scan code，
+        # 需要排除對側按鍵的 scan code 以確保只匹配指定側
         try:
-            self._expected_scans = set(keyboard.key_to_scan_codes(key))
+            raw_scans = set(keyboard.key_to_scan_codes(key))
+            # 若指定 right/left，排除對側的 scan code
+            opposite = None
+            key_lower = key.lower()
+            if key_lower.startswith("right "):
+                opposite = "left " + key_lower[6:]
+            elif key_lower.startswith("left "):
+                opposite = "right " + key_lower[5:]
+            if opposite:
+                try:
+                    opposite_scans = set(keyboard.key_to_scan_codes(opposite))
+                    raw_scans -= opposite_scans
+                except (ValueError, KeyError):
+                    pass
+            self._expected_scans = raw_scans
         except (ValueError, KeyError):
             self._expected_scans = set()
             print(f"[hotkey] 無法取得 '{key}' 的 scan code，將退回 name 匹配")
