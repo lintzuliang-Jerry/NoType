@@ -1,7 +1,7 @@
 """螢幕中下方固定浮動狀態提示視窗。
 
 使用 PIL 渲染圓角藥丸 + Win32 UpdateLayeredWindow 逐像素透明。
-錄音狀態：平滑脈動紅點。辨識中：三點序列淡入淡出動畫。
+錄音狀態：多層脈動光暈。辨識中：音波線 + 旋轉弧線動畫。
 """
 from __future__ import annotations
 
@@ -70,31 +70,61 @@ class _BF(ctypes.Structure):
     ]
 
 # ── 視覺設計 ──────────────────────────────────────────────────────────────────
-_W, _H        = 124, 50
-_RADIUS       = 25
-_BOTTOM_MARGIN = 80      # 距螢幕底部距離（px）
+_W, _H        = 220, 56
+_RADIUS       = 28
+_BOTTOM_MARGIN = 100
 
-# 背景：極深近黑，微帶藍調，高不透明度
-_BG           = (11, 11, 16, 248)
-_BORDER_A     = 28       # 細邊框 alpha（模擬毛玻璃邊緣）
-_SHINE_A      = 12       # 頂部高光 alpha
+# 背景色（錄音偏暖、辨識偏冷）
+_BG_REC  = (20, 14, 18, 238)
+_BG_TRX  = (14, 16, 24, 238)
+_BORDER  = (255, 255, 255, 34)
+_HL_A    = 10       # 頂部高光 alpha
 
-_STATES: dict[str, tuple[str, tuple[int,int,int], bool]] = {
-    "recording":    ("錄音中", (255, 55,  50), True),
-    "transcribing": ("辨識中", (255, 149,  0), False),
+# 錄音：珊瑚紅
+_REC_RGB = (255, 75, 75)
+_GLOW_CX = 30
+# (extra_radius, alpha_at_full_pulse, alpha_at_zero_pulse)
+_GLOW_LAYERS = [
+    (19, 14,  4),
+    (14, 38, 12),
+    (9,  80, 40),
+    (5, 170, 130),
+    (0, 255, 255),   # 實心核心
+]
+_CORE_R  = 5
+
+# 辨識：天藍
+_TRX_RGB = (80, 175, 255)
+# 音波條
+_WAVE_CXS     = [17, 23, 29, 35, 41]
+_WAVE_BAR_W   = 3
+_WAVE_MAX_H   = 20
+_WAVE_MIN_H   = 5
+# 旋轉弧線
+_SPIN_CX      = 196
+_SPIN_R       = 9
+_SPIN_WIDTH   = 2
+_SPIN_ARC     = 100
+
+# 分隔線
+_SEP_X  = 52
+_SEP_Y1 = 14
+_SEP_Y2 = 42
+
+# 文字
+_TEXT_X  = 62
+_FONT_SZ = 16
+
+# 底部光條
+_BAR_X1 = 28
+_BAR_X2 = 192
+_BAR_Y  = 50
+_BAR_H  = 2
+
+_STATES: dict[str, tuple[str, tuple[int,int,int]]] = {
+    "recording":    ("錄音中", _REC_RGB),
+    "transcribing": ("辨識中", _TRX_RGB),
 }
-
-_FONT_SZ      = 15
-_DOT_CX       = 26       # 錄音點中心 x
-_DOT_MIN      = 5
-_DOT_MAX      = 8
-_DOT_BASE     = 6
-
-# 辨識中三點
-_DOTS3_CX     = [15, 26, 37]   # 三點中心 x
-_DOT3_R_MIN   = 3
-_DOT3_R_MAX   = 5
-_TEXT_X       = 51       # 文字起始 x
 
 # ── 字型 ─────────────────────────────────────────────────────────────────────
 _font_cache: Optional[ImageFont.FreeTypeFont] = None
@@ -119,61 +149,97 @@ def _get_font() -> ImageFont.FreeTypeFont:
     return _font_cache
 
 # ── PIL 渲染 ─────────────────────────────────────────────────────────────────
-def _render(state: str, pulse: float = 0.0, tick: int = 0) -> Image.Image:
-    label, dot_rgb, do_pulse = _STATES[state]
-    img  = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
 
-    # 背景藥丸
-    draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS, fill=_BG)
-
-    # 細緻白色邊框，模擬毛玻璃質感
-    draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS,
-                            outline=(255, 255, 255, _BORDER_A), width=1)
-
-    # 頂部微高光（2px 漸層模擬）
-    highlight = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
-    hd = ImageDraw.Draw(highlight)
-    hd.rounded_rectangle([1, 1, _W - 2, _H // 2], radius=_RADIUS - 1,
-                          fill=(255, 255, 255, _SHINE_A))
-    img = Image.alpha_composite(img, highlight)
-    draw = ImageDraw.Draw(img)
-
+def _draw_recording_fx(draw: ImageDraw.ImageDraw, pulse: float) -> None:
+    """在 fx 透明層上繪製錄音光暈。"""
     cy = _H // 2
+    cx = _GLOW_CX
+    for extra_r, a_max, a_min in _GLOW_LAYERS:
+        r = _CORE_R + int(extra_r * (0.75 + 0.25 * pulse))
+        a = int(a_min + (a_max - a_min) * pulse)
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r],
+                     fill=(*_REC_RGB, a))
+    # 脈動環
+    ring_r = _CORE_R + 13
+    ring_a = int(30 + 55 * pulse)
+    draw.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r],
+                 outline=(*_REC_RGB, ring_a), width=1)
 
-    if do_pulse:
-        # 錄音：單點平滑脈動，帶多層光暈
-        r = _DOT_MIN + (_DOT_MAX - _DOT_MIN) * pulse
-        for layer_r, layer_a in [
-            (r + 11, int(18 * pulse)),
-            (r + 6,  int(45 * pulse)),
-            (r,      255),
-        ]:
-            lr = int(layer_r)
-            cx = _DOT_CX
-            draw.ellipse(
-                [cx - lr, cy - lr, cx + lr, cy + lr],
-                fill=(*dot_rgb, layer_a),
-            )
-        tx = _TEXT_X
+
+def _draw_transcribing_fx(draw: ImageDraw.ImageDraw, tick: int) -> None:
+    """在 fx 透明層上繪製音波線和旋轉弧線。"""
+    cy = _H // 2
+    # 音波條
+    for i, cx in enumerate(_WAVE_CXS):
+        phase = (tick / 30 * 2 * math.pi) - i * (2 * math.pi / len(_WAVE_CXS))
+        t = (math.sin(phase) + 1) / 2
+        h = int(_WAVE_MIN_H + (_WAVE_MAX_H - _WAVE_MIN_H) * t)
+        a = int(120 + 135 * t)
+        x0 = cx - _WAVE_BAR_W // 2
+        y0 = cy - h // 2
+        draw.rounded_rectangle([x0, y0, x0 + _WAVE_BAR_W, y0 + h],
+                               radius=1, fill=(*_TRX_RGB, a))
+    # 旋轉弧線
+    start_angle = (tick * 6) % 360
+    bbox = [_SPIN_CX - _SPIN_R, cy - _SPIN_R,
+            _SPIN_CX + _SPIN_R, cy + _SPIN_R]
+    draw.arc(bbox, start=start_angle, end=start_angle + _SPIN_ARC,
+             fill=(*_TRX_RGB, 200), width=_SPIN_WIDTH)
+    # 尾跡弧線（較淡）
+    trail_start = (start_angle - 60) % 360
+    draw.arc(bbox, start=trail_start, end=trail_start + 50,
+             fill=(*_TRX_RGB, 60), width=_SPIN_WIDTH)
+
+
+def _render(state: str, pulse: float = 0.0, tick: int = 0) -> Image.Image:
+    label, accent_rgb = _STATES[state]
+
+    # ── 底圖：背景藥丸 + 邊框 ─────────────────────────────────────────────
+    img = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    bg = _BG_REC if state == "recording" else _BG_TRX
+    draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS, fill=bg)
+    draw.rounded_rectangle([0, 0, _W - 1, _H - 1], radius=_RADIUS,
+                           outline=_BORDER, width=1)
+
+    # ── 頂部高光 ──────────────────────────────────────────────────────────
+    hl = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
+    ImageDraw.Draw(hl).rounded_rectangle(
+        [2, 2, _W - 3, _H // 3], radius=_RADIUS - 2,
+        fill=(255, 255, 255, _HL_A),
+    )
+    img = Image.alpha_composite(img, hl)
+
+    # ── 特效層（光暈 / 音波 / spinner / 分隔線 / 底部光條）────────────────
+    fx = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fx)
+
+    # 分隔線
+    fd.line([(_SEP_X, _SEP_Y1), (_SEP_X, _SEP_Y2)],
+            fill=(255, 255, 255, 22), width=1)
+
+    # 狀態特效
+    if state == "recording":
+        _draw_recording_fx(fd, pulse)
+        bar_a = int(55 + 130 * pulse)
     else:
-        # 辨識中：三點序列淡入淡出（相位差 120°）
-        for i, cx in enumerate(_DOTS3_CX):
-            phase = (tick / 36 * 2 * math.pi) - i * (2 * math.pi / 3)
-            t     = (math.sin(phase) + 1) / 2          # 0.0 ~ 1.0
-            alpha = int(60 + 195 * t)
-            r     = _DOT3_R_MIN + (_DOT3_R_MAX - _DOT3_R_MIN) * t
-            ri    = int(r)
-            draw.ellipse(
-                [cx - ri, cy - ri, cx + ri, cy + ri],
-                fill=(*dot_rgb, alpha),
-            )
-        tx = _TEXT_X
+        _draw_transcribing_fx(fd, tick)
+        bar_a = int(55 + 85 * ((math.sin(tick / 36 * 2 * math.pi) + 1) / 2))
 
+    # 底部光條
+    fd.rounded_rectangle([_BAR_X1, _BAR_Y, _BAR_X2, _BAR_Y + _BAR_H],
+                         radius=1, fill=(*accent_rgb, bar_a))
+
+    img = Image.alpha_composite(img, fx)
+
+    # ── 文字（近不透明，直接繪製）──────────────────────────────────────────
+    draw = ImageDraw.Draw(img)
     font = _get_font()
     bbox = draw.textbbox((0, 0), label, font=font)
-    ty   = (_H - (bbox[3] - bbox[1])) // 2 - 3
-    draw.text((tx, ty), label, font=font, fill=(255, 255, 255, 230))
+    ty = (_H - (bbox[3] - bbox[1])) // 2 - 2
+    # 文字陰影
+    draw.text((_TEXT_X + 1, ty + 1), label, font=font, fill=(0, 0, 0, 90))
+    draw.text((_TEXT_X, ty), label, font=font, fill=(255, 255, 255, 240))
 
     return img
 
@@ -258,7 +324,7 @@ class StatusOverlay:
 
     def _message_loop(self) -> None:
         hinstance  = kernel32.GetModuleHandleW(None)
-        class_name = "NoTypeOverlayV4"
+        class_name = "NoTypeOverlayV5"
 
         class _WC(ctypes.Structure):
             _fields_ = [
@@ -359,7 +425,7 @@ class StatusOverlay:
         self._ulw(hwnd, 0.0, x, y)
         user32.ShowWindow(hwnd, SW_SHOW)
         self._visible = True
-        user32.SetTimer(hwnd, TIMER_PULSE, 40, None)   # 40ms ≈ 25fps
+        user32.SetTimer(hwnd, TIMER_PULSE, 33, None)   # 33ms ≈ 30fps
 
     def _on_hide(self, hwnd: int) -> None:
         user32.KillTimer(hwnd, TIMER_PULSE)
@@ -367,6 +433,6 @@ class StatusOverlay:
         self._visible = False
 
     def _repaint(self, hwnd: int) -> None:
-        # 錄音：正弦脈動；辨識中：tick 傳給三點動畫
+        # 錄音：正弦脈動；辨識中：tick 傳給音波/spinner 動畫
         pulse = (math.sin(self._tick / 36 * 2 * math.pi) + 1) / 2
         self._ulw(hwnd, pulse, None, None)
