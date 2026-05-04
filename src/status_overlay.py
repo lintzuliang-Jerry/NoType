@@ -112,7 +112,7 @@ _SEP_Y1 = 11
 _SEP_Y2 = 33
 
 # 文字
-_TEXT_X  = 56
+_TEXT_X  = 53
 _FONT_SZ = 15
 
 # 底部光條
