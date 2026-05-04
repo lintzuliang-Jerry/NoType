@@ -41,7 +41,7 @@ class TextInjector:
         except Exception as e:
             print(f"[injector] 模擬 Ctrl+V 失敗: {e}")
 
-        time.sleep(0.10)
+        time.sleep(0.25)
 
         if self.preserve_clipboard and old_clipboard is not None:
             try:

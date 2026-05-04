@@ -27,7 +27,7 @@ class Recorder:
 
     def _callback(self, indata, frames, time_info, status):
         if status:
-            pass
+            print(f"[recorder] ⚠ 音訊警告: {status}")
         with self._lock:
             if self._recording:
                 self._chunks.append(indata.copy())

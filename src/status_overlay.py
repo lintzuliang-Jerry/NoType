@@ -154,13 +154,14 @@ def _draw_recording_fx(draw: ImageDraw.ImageDraw, pulse: float) -> None:
     """在 fx 透明層上繪製錄音光暈。"""
     cy = _H // 2
     cx = _GLOW_CX
+    max_r = cy - 3  # 保證不超出藥丸上下邊界
     for extra_r, a_max, a_min in _GLOW_LAYERS:
-        r = _CORE_R + int(extra_r * (0.75 + 0.25 * pulse))
+        r = min(_CORE_R + int(extra_r * (0.75 + 0.25 * pulse)), max_r)
         a = int(a_min + (a_max - a_min) * pulse)
         draw.ellipse([cx - r, cy - r, cx + r, cy + r],
                      fill=(*_REC_RGB, a))
     # 脈動環
-    ring_r = _CORE_R + 13
+    ring_r = min(_CORE_R + 13, max_r)
     ring_a = int(30 + 55 * pulse)
     draw.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r],
                  outline=(*_REC_RGB, ring_a), width=1)

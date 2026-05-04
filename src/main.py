@@ -133,6 +133,7 @@ def main() -> int:
 
     hotkeys = HotkeyManager(
         hotkey=cfg.hotkey,
+        mode=cfg.hotkey_mode,
         on_press=on_press,
         on_release=on_release,
     )
