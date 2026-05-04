@@ -12,7 +12,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG: dict = {
     "hotkey": "right ctrl",
-    "hotkey_mode": "hold",
+    "hotkey_mode": "toggle",
     "whisper": {
         "model_size": "medium",
         "language": "zh",
@@ -65,7 +65,7 @@ class TrayConfig:
 @dataclass
 class Config:
     hotkey: str = "right ctrl"
-    hotkey_mode: str = "hold"
+    hotkey_mode: str = "toggle"
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
