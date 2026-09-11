@@ -1,8 +1,12 @@
-# 語音聽寫工具
+# NoType — 本機語音聽寫工具
 
-100% 本機、免費、注重隱私的 Windows 語音聽寫桌面工具。按住熱鍵說話,放開後文字自動貼到游標所在位置。
+免費、注重隱私的 Windows 語音聽寫工具。按一下熱鍵開始說話，再按一次停止，文字會自動貼到游標所在位置。
 
-- **完全離線**:語音資料永不離開你的電腦
+## 為什麼做這個專案
+
+我想使用 Typeless 類型的語音輸入體驗，但不希望被訂閱費或複雜功能綁住。語音轉文字的核心需求其實很明確，因此我嘗試用本機模型做出一個自己每天都能使用的版本。
+
+- **本機轉錄**:語音由電腦上的 Whisper 模型處理，不上傳到轉錄服務
 - **免費**:不需要 API Key、訂閱或帳號
 - **中文優化**:Whisper 模型 + OpenCC 繁體轉換
 
@@ -64,7 +68,7 @@ run.bat
 ```json
 {
   "hotkey": "right ctrl",
-  "hotkey_mode": "hold",
+  "hotkey_mode": "toggle",
   "whisper": {
     "model_size": "medium",
     "language": "zh",
@@ -92,7 +96,7 @@ run.bat
 | 欄位 | 說明 | 常用值 |
 |---|---|---|
 | `hotkey` | 錄音熱鍵 | `"right ctrl"` `"caps lock"` `"f9"` `"right alt"` |
-| `hotkey_mode` | `"hold"` 按住說話 / `"toggle"` 按一下開始再按停止 | `"hold"` |
+| `hotkey_mode` | `"hold"` 按住說話 / `"toggle"` 按一下開始再按停止 | `"toggle"` |
 | `whisper.model_size` | Whisper 模型大小,越大越準但越慢 | `"tiny"` `"base"` `"small"` `"medium"` `"large-v3"` |
 | `whisper.language` | 辨識語言 | `"zh"` 中文, `"en"` 英文, `null` 自動偵測 |
 | `whisper.device` | `"auto"` 自動選擇, `"cpu"` 強制 CPU, `"cuda"` 強制 GPU | `"auto"` |
